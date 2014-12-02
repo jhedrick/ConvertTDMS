@@ -257,8 +257,17 @@ function [ConvertedData,ConvertVer,ChanNames,GroupNames,ci]=convertTDMS(varargin
 % This feature was added in LV2013 (I believ) and produced an error in 
 % the previous version of this code.
 %-------------------------------------------------------------------------
+
+%-------------------------------------------------------------------------
+%Brad Humphreys - v1.991 2014-12-1
+%Corrected issue where when properties, but not raw data was updated in a
+%later segment (rawDataIndex=FFFFFFFF), the channel index was still
+%appended with a copy of the previous entries data.
+%-------------------------------------------------------------------------
+
+
 %Initialize outputs
-ConvertVer='1.98';    %Version number of this conversion function
+ConvertVer='1.991';    %Version number of this conversion function
 ConvertedData=[];
 
 p=inputParser();
@@ -373,8 +382,10 @@ function [SegInfo,NumOfSeg]=getSegInfo(fid)
 %         SegInfo.DataLength: Number of bytes of Data in segment
 %         SegInfo.vernum: LV version number (4712 is v1.0, 4713 is v2.0)
 %         SegInfo.NumChan: number of channels in this segement.  This is
-%           only instatated in this function to 0.  The addChanCount function
-%           updates this to the actual value later.
+%           only instatated in this function to 0.  This is later updated
+%           to show the number of channels in the segment (note that this
+%           is not the number of raw data channels in the segment, as a
+%           segment can just have property data).
 %
 %         SegInfo.SegHasMetaData:  There is Meta Data in the Segement
 %         SegInfo.SegHasRawData: There is Raw Data in the Segment
@@ -721,7 +732,7 @@ for segCnt=1:NumOfSeg
             rawdataindex=fread(fid,1,'uint32',kTocEndian);
             
             if rawdataindex==0
-                if segCnt==0
+                if segCnt==0    %Unclear why this is here, segCnt should always be >=1, unless there is a significant error 
                     e=errordlg(sprintf('Seqment %.0f within ''%s'' has ''rawdataindex'' value of 0 (%s.m).',segCnt,...
                         TDMSFileNameShort,mfilename),'Incorrect ''rawdataindex''');
                     uiwait(e)
@@ -732,6 +743,7 @@ for segCnt=1:NumOfSeg
                     else
                         ccnt=index.(obname).rawdatacount;
                     end
+                    %Copy the previous segments raw data info
                     index.(obname).rawdatacount=ccnt;
                     index.(obname).datastartindex(ccnt)=SegInfo.DataStartPosn(segCnt);
                     index.(obname).arrayDim(ccnt)=index.(obname).arrayDim(ccnt-1);
@@ -757,12 +769,24 @@ for segCnt=1:NumOfSeg
                             else
                                 ccnt=index.(obname).rawdatacount;
                             end
+% Modified by BTH 7-7-14.  This caused an issue with files where properties
+% were updated in later segments but no raw data was in that segment (it
+% was copying the previous segments info instead of just setting it to default values).
+%                             index.(obname).rawdatacount=ccnt;
+%                             index.(obname).datastartindex(ccnt)=SegInfo.DataStartPosn(segCnt);
+%                             index.(obname).arrayDim(ccnt)=index.(obname).arrayDim(ccnt-1);
+%                             index.(obname).nValues(ccnt)=index.(obname).nValues(ccnt-1);
+%                             index.(obname).byteSize(ccnt)=index.(obname).byteSize(ccnt-1);
+%                             index.(obname).index(ccnt)=segCnt;
                             index.(obname).rawdatacount=ccnt;
-                            index.(obname).datastartindex(ccnt)=SegInfo.DataStartPosn(segCnt);
-                            index.(obname).arrayDim(ccnt)=index.(obname).arrayDim(ccnt-1);
-                            index.(obname).nValues(ccnt)=index.(obname).nValues(ccnt-1);
-                            index.(obname).byteSize(ccnt)=index.(obname).byteSize(ccnt-1);
+                            index.(obname).datastartindex(ccnt)=0;
+                            index.(obname).arrayDim(ccnt)=0;
+                            index.(obname).nValues(ccnt)=0;
+                            index.(obname).byteSize(ccnt)=0;
                             index.(obname).index(ccnt)=segCnt;
+
+
+
                             SegInfo.NumChan(segCnt)=SegInfo.NumChan(segCnt)+1;
                         end
                     end
@@ -1074,7 +1098,7 @@ for segCnt=1:NumOfSeg
 %             
 %         end
         
-        aa=1;
+        
 %         %Now adjust multiplier and skip if the data is interleaved
 %         if kTocInterleavedData
 %             if muliplier>0  %Muliple raw data segements appened
@@ -1217,8 +1241,8 @@ for kk=1:length(fnm)    %Loop through objects
                             if strcmp(matType,'uint8=>char')                              
                                 data=convertToText(data);
                             end
-                        else
-                            % Added by Haench start
+                        else 
+                             % Added by Haench start
                             if  (id.dataType == 524300) || (id.dataType == 1048589) % complex CDB data
                                 [data,cnt]=fread(fid,2*nvals*id.multiplier(rr),matType,kTocEndian);                               
                                 data= data(1:2:end)+1i*data(2:2:end);
@@ -1227,7 +1251,7 @@ for kk=1:length(fnm)    %Loop through objects
                                 [data,cnt]=fread(fid,nvals*id.multiplier(rr),matType,kTocEndian);
                             end
                             % Haench end
-                            % Original: [data,cnt]=fread(fid,nvals*id.multiplier(rr),matType,kTocEndian);
+                            % Original: [data,cnt]=fread(fid,nvals*id.multiplier(rr),matType,kTocEndian);   
                         end
                 end
                 
@@ -1385,9 +1409,9 @@ for i=1:numel(obFieldNames)
                             Value=cell(index.(cname).(cfield).cnt,1);
                             for c=1:index.(cname).(cfield).cnt
                                 if iscell(index.(cname).(cfield).value)
-                                    Value(c)=index.(cname).(cfield).value;
+                                    Value(c)=index.(cname).(cfield).value(c);
                                 else
-                                    Value(c)={index.(cname).(cfield).value};
+                                    Value(c)={index.(cname).(cfield).value(c)};
                                 end
                             end
                         end
@@ -1563,8 +1587,8 @@ switch LVType
     case 33  %tdsTypeBoolean
         matType='bit1';
     case 68  %tdsTypeTimeStamp
-        matType='2*int64';
-    % Added by Haench for tdsTypeComplexSingleFloat=0x08000c,tdsTypeComplexDoubleFloat=0x10000d,
+        matType='2*int64';  
+   % Added by Haench for tdsTypeComplexSingleFloat=0x08000c,tdsTypeComplexDoubleFloat=0x10000d,
    case 524300
         matType='single';
     case 1048589
