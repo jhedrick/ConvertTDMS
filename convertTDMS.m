@@ -1153,7 +1153,51 @@ for kk=1:length(fnm)    %Loop through objects
         if id.dataType==32
             ob.(cname).data=cell(nsamples,1);
         else
-            ob.(cname).data=zeros(nsamples,1);
+            try
+                ob.(cname).data=zeros(nsamples,1); % This is the problematic piece of code here...
+                % The problem is likely initiated up in getSegInfo(), but could also be influenced by getChanInfo()
+                % Not sure if the data type is correct from the TOC reader? Might also be starting data index in the segment?
+                % The following catch statement modifies the index structure to allow the file to continue processing, but does not correctly capture the value of the extracted data.
+
+            catch ME
+                if 1 == 1 % Implement hotfix for missing index in "raw" data
+
+                    warning('Atempting hotfix on %s, field name index kk=%d',id.long_name,kk)
+                    % Assumptions
+                    index.(fnm{kk}).nValues = id.nValues(1)*ones(id.rawdatacount,1); % Assume all nValues are equal in all segments.
+                    index.(fnm{kk}).multiplier = ones(id.rawdatacount,1); % Assume all multipliers are 1.
+
+                    % Start fix for sequential data issues where datastartindex is set to 0 in the middle of the list.
+                    try
+                        ibitlist = 1;
+                        while ibitlist <= length(index.(fnm{kk}).datastartindex) % Strangely couldnt use a for loop here?!?
+                            if index.(fnm{kk}).datastartindex(ibitlist) == 0
+                                % Remove all elements from the associated vectors.
+                                index.(fnm{kk}).datastartindex(ibitlist)=[];
+                                index.(fnm{kk}).arrayDim(ibitlist)=[];
+                                index.(fnm{kk}).nValues(ibitlist)=[];
+                                index.(fnm{kk}).byteSize(ibitlist)=[];
+                                index.(fnm{kk}).index(ibitlist)=[];
+                                index.(fnm{kk}).rawdataoffset(ibitlist)=[];
+                                index.(fnm{kk}).multiplier(ibitlist)=[];
+                                index.(fnm{kk}).skip(ibitlist)=[];
+                                % Reduce the total raw data count by one due to the deletion.
+                                index.(fnm{kk}).rawdatacount = index.(fnm{kk}).rawdatacount - 1;
+                            end
+                            ibitlist = ibitlist + 1;
+                        end
+                    catch ME
+                        fprintf('Failed to adjust start index.\n')
+                        rethrow(ME)
+                    end
+                    % Re-attempt to initialize the ob.(cname).data vector.
+                    id=index.(fnm{kk});
+                    nsamples=sum(id.nValues.*id.multiplier);
+                    ob.(cname).data=zeros(nsamples,1);
+                else
+                    rethrow(ME)
+                end
+            end
         end
         
         for rr=1:id.rawdatacount
